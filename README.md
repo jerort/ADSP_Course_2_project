@@ -8,4 +8,4 @@ Some web scraping is performed to get all the teams in the knockout phase for ev
 Every team that reached that phase given a score according to their performance, as shown in the seaon's bracket:
 5 - Winner, 4 - Final, 3 - Semi-final, 2 - Quarter-finals, 1 - Round of 16
 
-Data is persisted in a file for visualisation purposes, and then retrived to show the global performance of every contry (with the data groupped) over the 1955-2022 period
+Data is saved in a csv file for visualisation purposes, and then retrived to show the global performance of every contry (with the data groupped) over the 1955-2022 period
