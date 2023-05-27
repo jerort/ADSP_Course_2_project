@@ -18,6 +18,7 @@ from urllib.request import urlopen
 from bs4 import BeautifulSoup
 from datetime import datetime
 
+import team_func
 
 # Ignore SSL certificate errors
 ctx = ssl.create_default_context()
@@ -75,119 +76,148 @@ for season, season_URL in seasons['URL'].items():
         html = urlopen("https://en.wikipedia.org"+season_URL, context=ctx).read()
         soup = BeautifulSoup(html, "html.parser")
         
-        # Find the element containing the tournament bracket
-        bracket_element = soup.find(id="Bracket")
-        if not bracket_element: 
-            raise ValueError(f"""Season {season} might not have a bracket table. 
-                        Check https://en.wikipedia.org{season_URL}""")
+        # Find the element containing the appropiate section 
+        # Each section is given a score according to difficulty
+        wikipedia_sections = [("Final", 3), #2T#This is always present
+                              ("Semi-finals", 2), #4T #Missing in 92-93 and 91-93
+                              ("Quarter-finals", 1)] #8T #Missing in 93-94, 92-93 and 91-93        
         
-        # Find the bracket table
-        table = bracket_element.find_next("table")
+        #Other stages that might be incoporated before Quarter-finals
+        # [("Second_group_stage", 0), #16T# replaces knockout stage for 1995-2003
+        # ("Round_of_16", 0), #16T# 1st knockout stage from 2004...
+        # ("Second_round", 0), #16T# 1st knockout stage for  1962...
+        # ("First_round", 0), #16T# 1st knockout stage for  1955...                              
+        # ("Preliminary_round", 0)] #16T# 1st knockout stage for  1956-1962...                              
         
-        # Create a dictionaries to store the tournament bracket data
+        # Empty dictionaries to store data
         bracket = {}
-        finalists = {}
         teams = {}
         
-        # Since each team is attached the flag of its country, we can iterate over
-        # the table flags and get the data we need
-        for row in table.find_all("span", class_='flagicon'):
-            # Get the country name according to the flag
-            country = row.find_next("img").get('alt','Not defined')
-            team_anchor = row.find_next("a").find_next("a")
-            team_URL = team_anchor.get('href',None)
-            team_name = team_anchor.contents[0]
-            teams[team_URL] = (team_name,country)
-            if len(team_name) <= 3:               
-                raise ValueError(f"""Team {team_name} might have a wrong name. 
-                            Check https://en.wikipedia.org{season_URL}""")        
+        # Find teams in each section
+        for section, score in wikipedia_sections:
             
-            # Clean info between parentheses after the team name
-            result=re.match("(.*)\s+\(.*\)", team_name)
-            if result: team_name = result.group(0)
+            # Try to find the name of the stage in the HTML body
+            section_element = soup.find(id=section) 
+            if not section_element: 
+                if season in ["1991–92","1992–93","1993–94"]: #Not hyphens
+                    section = "Group_stage" #League format with 8 teams equivalent ot quarters
+                    score = 1
+                    section_element = soup.find(id=section)
+                else:    
+                    continue            
             
-            # After the team name, up to three cells display the goals scored
-            # depending on the number of matches played   
-            next_cell = team_anchor
-            for scores in list(range(0,4,1)):
-                next_cell = next_cell.find_next("td")
-                if len(next_cell.contents) == 0: #No more info for the team
+            # Determing heading level for the section: h#
+            heading_level = str(section_element.parent.name)
+            # Determing preceding heading level for the section h#-1
+            heading_level_0 = "h"+str(int(re.match("h(\d+)",
+                                       heading_level).group(1))-1)  
+            
+            section_heding = section_element.find_previous(heading_level)
+            
+            # Since each team is attached the flag of its country, we can 
+            # iterate over the section flags and get the data we need
+            
+            # Iterate through siblings until separator is found
+            for sibling in section_heding.find_next_siblings():
+                if (sibling.name == heading_level)or(sibling.name == heading_level_0):  
                     break
-                
-                # Store in case of finalist (only 1 match/score)  
-                finalist_result = next_cell.contents[0] 
-                
-                # Check if the cell represents goals and penalties
-                result=re.match("(\d+)\s+\((\d+)\)", finalist_result)
-                # Penalties are added to goals to sort dictionary later
-                if result: 
-                    finalist_result = str(int(result.group(1))
-                                          +int(result.group(2)))
+                for row in sibling.find_all("span", class_='flagicon'):
+                    # Get the country name according to the flag
+                    country = row.find_next("img").get('alt','Not defined')
                     
-            if scores==1: # The team must be a finalist
-                if team_name in finalists:
-                    raise ValueError(f"""Team {team_name} might be a duplicated finalist. 
-                                Check https://en.wikipedia.org{season_URL}""")
-                finalists.update({team_URL: finalist_result})
-                bracket[team_URL] = bracket.get(team_URL, 0) + 1 #Rounds counter
-            elif scores==3: # The team has played 2 matches + global result
-                bracket[team_URL] = bracket.get(team_URL, 0) + 1 #Rounds counter
-            else:
-                raise ValueError(f"""Team {team_name} might not have played any matches. 
-                            Check https://en.wikipedia.org{season_URL}""")
-        
-        # As the number of teams in the bracket is not constant over seasons
-        # we need to find the teams that played the preliminary round and 
-        # decrease their score by 1. Then we can drop all the teams with 
-        # 0 score 
-        
-        if len(bracket) > 16:
-            # Find the element containing Preliminary Round rable
-            preliminary = soup.find(id="Preliminary_round").find_next("table").find_next("table")              
-            # Since each team that appears in the second table has played the
-            # preliminary round, we can retrieve all their URLs and operate
-            # with them
-            preliminary_URLs = {}
-            for anchor in preliminary.find_all("a"):                
-                URL = anchor.get('href',None)
-                preliminary_URLs.update({URL: None})
-            
-            # Decrease the score of teams in the premilimnary round by 1    
-            for URL in preliminary_URLs.keys():  
-                if URL in bracket.keys():
-                    bracket[URL] -=1
-            # Remove the teams that did not pass the premilimnary round            
-            bracket = {key:val for key, val in bracket.items() if val != 0}
-        
-        # Data checks
-        if len(bracket) != 16:
-            raise ValueError(f"""There are not 16 teams in the tournament. 
-                        Check https://en.wikipedia.org{season_URL}""")
-        if len(finalists) != 2:
-            raise ValueError(f"""There are not 2 finalists in the tournament.  
-                        Check https://en.wikipedia.org{season_URL}""")                       
-            
+                    # Get team and URL
+                    (team_URL,team_name) = team_func.team_from_flag(row)    
+                   
+                    # Check just in case
+                    if len(team_name) <= 1:
+                        raise ValueError(f"""No team for flag {str(row.parent.parent)} 
+                                    Check https://en.wikipedia.org{season_URL}""")                                          
+                                        
+                    # Create the team if not in the dictionary                
+                    if team_URL not in teams: teams[team_URL] = (team_name,country)  
+                    
+                    # Create/update the team score according to the round reached          
+                    if bracket.get(team_URL, 0) < score:
+                        bracket[team_URL] = score  
+                                 
         # Determine the winner and add score
-        finalists = sorted(finalists.items(), key=lambda item: item[1])
-        winner = finalists[1][0]
-        bracket[winner] = bracket.get(winner) + 1 
+        summary = soup.find("table", class_="infobox vcalendar")
+        finalists = summary.find_all("span", class_='flagicon')       
         
-        # Count the number of tean in each round                      
-        if list(bracket.values()).count(1) != 8:
-            raise ValueError(f"""There are not 8 teams dropped in the 1st round. 
-                        Check https://en.wikipedia.org{season_URL}""")
-        if list(bracket.values()).count(2) != 4:
-            raise ValueError(f"""There are not 4 teams dropped in Quarter-finals. 
-                        Check https://en.wikipedia.org{season_URL}""")        
-        if list(bracket.values()).count(3) != 2:
-            raise ValueError(f"""There are not 4 teams dropped in Semi-finals. 
-                        Check https://en.wikipedia.org{season_URL}""")
+        # Two finalist should be found, being the first one the champions,
+        # but it is checked anyway
+        for finalist in finalists:
+            if finalist.find_previous("th",scope="row",
+                     class_="infobox-label").contents[0] == "Champions":
+                team_URL = finalist.find_next("a").find_next("a").get('href',None)
+                
+                # Clean info between parentheses after the team URL
+                result=re.match("(.*)\_\(.*\)", team_URL)
+                if result: team_URL = result.group(1)
+                
+                # Standarise any dot in the the team URL: F.C. = FC
+                team_URL = team_URL.replace('.', '')
+                
+                break
+            else:
+                team_URL = None
+        
+        # Add score to winner                
+        bracket[team_URL] = bracket.get(team_URL, 0) + 1
+        
+        # Add score to "semi-finalists" 
+        # (2nd team classified in each group of the group stage)
+        if season in ["1991–92","1992–93"]: #Not hyphens
+            for section in ["Group_A","Group_B"]:
+                # Try to find the name of the stage in the HTML body
+                section_element = soup.find(id=section)
+                
+                # Find the table with the classification
+                table = section_element.find_next(class_="wikitable")
+                                               
+                # Find the second flag (team_URL) in the table
+                flag = table.find_next("span", class_='flagicon')
+                flag = flag.find_next("span", class_='flagicon')
+                
+                
+                
+                # Get team and URL
+                (team_URL,team_name) = team_func.team_from_flag(flag) 
+                
+                # Add score to "semi-finalists"               
+                bracket[team_URL] = bracket.get(team_URL, 0) + 1
+        
+        # Fix Inter Milan issue (duplicated URL)
+        bracket = team_func.remove_duplicate(bracket,
+                                             "/wiki/Inter_Milan",
+                                             "/wiki/FC_Internazionale_Milano")
+        
+        # Fix FC Barcelona issue (duplicated URL)
+        bracket = team_func.remove_duplicate(bracket,
+                                             "/wiki/FC_Barcelona",
+                                             "/wiki/Barcelona_CF")       
+        
+        # Fix Malmö issue (duplicated URL)
+        bracket = team_func.remove_duplicate(bracket,
+                                             "/wiki/IFK_Malm%C3%B6_Fotboll",
+                                             "/wiki/IFK_Malm%C3%B6")                           
+        
+        # Check the number of teams in each stage 
         if list(bracket.values()).count(4) != 1:
-            raise ValueError(f"""There is not 1 team dropped in the Final. 
-                        Check https://en.wikipedia.org{season_URL}""")         
-        if list(bracket.values()).count(5) != 1:
             raise ValueError(f"""There is not 1 winner team. 
                         Check https://en.wikipedia.org{season_URL}""") 
+        if list(bracket.values()).count(3) != 1:
+            raise ValueError(f"""There is not 1 team dropped in the Final. 
+                        Check https://en.wikipedia.org{season_URL}""")
+        if list(bracket.values()).count(2) != 2:
+            raise ValueError(f"""There are not 4 teams dropped in Semi-finals. 
+                        Check https://en.wikipedia.org{season_URL}""")
+        if list(bracket.values()).count(1) != 4:
+            raise ValueError(f"""There are not 4 teams dropped in Quarter-finals. 
+                        Check https://en.wikipedia.org{season_URL}""")
+        # if list(bracket.values()).count(0) != 8:
+        #     raise ValueError(f"""There are not 8 teams dropped in the 1st round. 
+        #                 Check https://en.wikipedia.org{season_URL}""")                
     
         # Save data to csv file    
         with open('UEFA_brackets_data.csv', 'a', newline='',
@@ -203,5 +233,4 @@ for season, season_URL in seasons['URL'].items():
     
     # End of proccessing    
     print("")
-    idx+=1
-        
+    idx+=1  
