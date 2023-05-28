@@ -15,6 +15,7 @@ import logging
 
 import ssl
 from urllib.request import urlopen
+from urllib.request import urlretrieve
 from bs4 import BeautifulSoup
 from datetime import datetime
 
@@ -49,9 +50,12 @@ seasons = seasons.sort_index()
 lastYear = datetime.now().year-1
 seasons = seasons[seasons.index<str(lastYear)+"-"+str(lastYear+1)]
 
+# Create folder to store flags
+os.makedirs(os.path.join(os.getcwd(), "flags")) 
+
 # Retrieve data for each season and append at the end of a file
 idx = 1
-for season, season_URL in seasons['URL'].items():
+for season, season_URL in seasons['URL'][:].items():
     print(f"Reading data for season {idx} ({season}) out of {len(seasons['URL'])}")
     try:
         ## Check if the file to save data exists and create it
@@ -59,7 +63,7 @@ for season, season_URL in seasons['URL'].items():
             with open('UEFA_brackets_data.csv', 'w', newline='',
                       encoding="utf-8") as file:
                 writer = csv.writer(file)    
-                writer.writerow(["Season", "Team", "Country", "Score"])
+                writer.writerow(["Season", "Team", "Score", "Country", "Flag"])
             file.close()           
                 
         ## Check if the data for current season is already in the file
@@ -124,17 +128,25 @@ for season, season_URL in seasons['URL'].items():
                 for row in sibling.find_all("span", class_='flagicon'):
                     # Get the country name according to the flag
                     country = row.find_next("img").get('alt','Not defined')
+                    flag_URL = "https:"+row.find_next("img").get('src',None)
+                    flag_file = flag_URL.split("/")[-1]
+                    
+                    # Download flag image to folder
+                    urlretrieve(flag_URL, os.path.join(os.getcwd(),
+                                                       "flags",flag_file))
                     
                     # Get team and URL
                     (team_URL,team_name) = team_func.team_from_flag(row)    
-                   
+                    
                     # Check just in case
                     if len(team_name) <= 1:
                         raise ValueError(f"""No team for flag {str(row.parent.parent)} 
                                     Check https://en.wikipedia.org{season_URL}""")                                          
                                         
                     # Create the team if not in the dictionary                
-                    if team_URL not in teams: teams[team_URL] = (team_name,country)  
+                    if team_URL not in teams: teams[team_URL] = (team_name,
+                                                                 country,
+                                                                 flag_file)  
                     
                     # Create/update the team score according to the round reached          
                     if bracket.get(team_URL, 0) < score:
@@ -177,8 +189,7 @@ for season, season_URL in seasons['URL'].items():
                                                
                 # Find the second flag (team_URL) in the table
                 flag = table.find_next("span", class_='flagicon')
-                flag = flag.find_next("span", class_='flagicon')
-                
+                flag = flag.find_next("span", class_='flagicon')                
                 
                 
                 # Get team and URL
@@ -224,7 +235,8 @@ for season, season_URL in seasons['URL'].items():
                   encoding="utf-8") as file:
             writer = csv.writer(file) 
             for key,val in bracket.items():
-                writer.writerow([season, teams[key][0],teams[key][1], val])
+                writer.writerow([season, teams[key][0], val,
+                                 teams[key][1], teams[key][2]])
         file.close()
         
     except Exception:
