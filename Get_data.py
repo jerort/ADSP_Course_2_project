@@ -51,7 +51,8 @@ lastYear = datetime.now().year-1
 seasons = seasons[seasons.index<str(lastYear)+"-"+str(lastYear+1)]
 
 # Create folder to store flags
-os.makedirs(os.path.join(os.getcwd(), "flags")) 
+if not os.path.exists(os.path.join(os.getcwd(), "flags")):
+    os.makedirs(os.path.join(os.getcwd(), "flags")) 
 
 # Retrieve data for each season and append at the end of a file
 idx = 1
@@ -116,24 +117,29 @@ for season, season_URL in seasons['URL'][:].items():
             heading_level_0 = "h"+str(int(re.match("h(\d+)",
                                        heading_level).group(1))-1)  
             
-            section_heding = section_element.find_previous(heading_level)
+            section_heading = section_element.find_previous(heading_level)
             
             # Since each team is attached the flag of its country, we can 
             # iterate over the section flags and get the data we need
             
             # Iterate through siblings until separator is found
-            for sibling in section_heding.find_next_siblings():
+            for sibling in section_heading.find_next_siblings():
                 if (sibling.name == heading_level)or(sibling.name == heading_level_0):  
                     break
                 for row in sibling.find_all("span", class_='flagicon'):
-                    # Get the country name according to the flag
+                    # Check that the span contains an image
+                    if not row.img:
+                        continue
+                    
+                    # Get the country name according to the flag                    
                     country = row.find_next("img").get('alt','Not defined')
                     flag_URL = "https:"+row.find_next("img").get('src',None)
                     flag_file = flag_URL.split("/")[-1]
                     
                     # Download flag image to folder
-                    urlretrieve(flag_URL, os.path.join(os.getcwd(),
-                                                       "flags",flag_file))
+                    flag_path = os.path.join(os.getcwd(),"flags",flag_file)
+                    if not os.path.exists(flag_path):
+                        urlretrieve(flag_URL, flag_path)
                     
                     # Get team and URL
                     (team_URL,team_name) = team_func.team_from_flag(row)    
@@ -151,7 +157,7 @@ for season, season_URL in seasons['URL'][:].items():
                     # Create/update the team score according to the round reached          
                     if bracket.get(team_URL, 0) < score:
                         bracket[team_URL] = score  
-                                 
+                                    
         # Determine the winner and add score
         summary = soup.find("table", class_="infobox vcalendar")
         finalists = summary.find_all("span", class_='flagicon')       
@@ -228,9 +234,10 @@ for season, season_URL in seasons['URL'][:].items():
                         Check https://en.wikipedia.org{season_URL}""")
         # if list(bracket.values()).count(0) != 8:
         #     raise ValueError(f"""There are not 8 teams dropped in the 1st round. 
-        #                 Check https://en.wikipedia.org{season_URL}""")                
-    
-        # Save data to csv file    
+        #                 Check https://en.wikipedia.org{season_URL}""")               
+        
+        # Save data to csv file 
+            
         with open('UEFA_brackets_data.csv', 'a', newline='',
                   encoding="utf-8") as file:
             writer = csv.writer(file) 
