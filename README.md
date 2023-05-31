@@ -6,6 +6,6 @@ Which countries have dominated the European Cup and UEFA Champions League each s
 
 Some web scraping is performed to get the best 8 teams in the knockout phase for every season.
 Every team that reached that phase is given a score according to their performance, as shown in the season's bracket:
-4 - Winner, 3 - Final, 2 - Semi-final, 1 - Quarter-finals
+4 - winner, 3 - final, 2 - semi-final, 1 - quarter-finals
 
 Data is saved in a csv file for visualisation purposes, and then retrived to show the global performance of every contry (with the data groupped) over the 1955-2022 period
